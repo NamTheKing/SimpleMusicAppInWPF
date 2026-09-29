@@ -9,6 +9,7 @@ using SimpleMusicApp.Audio;
 using SimpleMusicApp.Models;
 using IOPath = System.IO.Path;                    // avoid clash with System.Windows.Shapes.Path
 using Rectangle = System.Windows.Shapes.Rectangle;
+using Track = SimpleMusicApp.Models.Track;       // avoid clash with System.Windows.Controls.Primitives.Track
 
 namespace SimpleMusicApp;
 
