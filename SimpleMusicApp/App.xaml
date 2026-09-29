@@ -3,36 +3,154 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-        <!-- Shared colors -->
-        <SolidColorBrush x:Key="BgBrush" Color="#1E1E2E"/>
-        <SolidColorBrush x:Key="PanelBrush" Color="#2A2A3C"/>
-        <SolidColorBrush x:Key="AccentBrush" Color="#7C5CFF"/>
-        <SolidColorBrush x:Key="TextBrush" Color="#EDEDF5"/>
-        <SolidColorBrush x:Key="SubTextBrush" Color="#9A9AB0"/>
 
-        <!-- Round control button -->
-        <Style x:Key="ControlButton" TargetType="Button">
-            <Setter Property="Width" Value="44"/>
-            <Setter Property="Height" Value="44"/>
-            <Setter Property="Margin" Value="6,0"/>
+        <!-- ═════════ Spotify-like colors ═════════ -->
+        <SolidColorBrush x:Key="BgBrush" Color="#000000"/>
+        <SolidColorBrush x:Key="PanelBrush" Color="#121212"/>
+        <SolidColorBrush x:Key="HoverBrush" Color="#2A2A2A"/>
+        <SolidColorBrush x:Key="SelectedBrush" Color="#3E3E3E"/>
+        <SolidColorBrush x:Key="GreenBrush" Color="#1DB954"/>
+        <SolidColorBrush x:Key="TextBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="SubTextBrush" Color="#B3B3B3"/>
+        <SolidColorBrush x:Key="TrackBgBrush" Color="#4D4D4D"/>
+
+        <!-- Colorful "album cover" gradient -->
+        <LinearGradientBrush x:Key="ArtBrush" StartPoint="0,0" EndPoint="1,1">
+            <GradientStop Color="#1DB954" Offset="0"/>
+            <GradientStop Color="#1E6FD9" Offset="0.6"/>
+            <GradientStop Color="#7B2FF7" Offset="1"/>
+        </LinearGradientBrush>
+
+        <!-- Icon font built into Windows 10/11 -->
+        <FontFamily x:Key="Icons">Segoe MDL2 Assets</FontFamily>
+
+        <!-- ═════════ Icon button (prev / next / add) ═════════ -->
+        <Style x:Key="IconButton" TargetType="Button">
+            <Setter Property="FontFamily" Value="{StaticResource Icons}"/>
             <Setter Property="FontSize" Value="16"/>
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-            <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource SubTextBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Width" Value="36"/>
+            <Setter Property="Height" Value="36"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="22">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="18">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ═════════ Big white round Play button ═════════ -->
+        <Style x:Key="PlayButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Margin" Value="16,0"/>
+            <Setter Property="Background" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Foreground" Value="Black"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value>
+                    <ScaleTransform/>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <!-- Grows a little on hover, like Spotify -->
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="Black"/>
+                    <Setter Property="RenderTransform">
+                        <Setter.Value>
+                            <ScaleTransform ScaleX="1.08" ScaleY="1.08"/>
+                        </Setter.Value>
+                    </Setter>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ═════════ Thin slider: white bar, turns green + shows knob on hover ═════════ -->
+        <Style x:Key="SliderBar" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <!-- Transparent outer area = bigger click target than the 4px bar -->
+                        <Border Background="Transparent">
+                            <Border Height="4" CornerRadius="2" Background="{TemplateBinding Background}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SpotifySlider" TargetType="Slider">
+            <Setter Property="IsMoveToPointEnabled" Value="True"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Height="16" VerticalAlignment="Center">
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton x:Name="Fill" Style="{StaticResource SliderBar}"
+                                                  Background="{StaticResource TextBrush}"
+                                                  Command="Slider.DecreaseLarge"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Style="{StaticResource SliderBar}"
+                                                  Background="{StaticResource TrackBgBrush}"
+                                                  Command="Slider.IncreaseLarge"/>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb x:Name="Knob" Width="12" Height="12" Opacity="0">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="White"/>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="border" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Fill" Property="Background" Value="{StaticResource GreenBrush}"/>
+                                <Setter TargetName="Knob" Property="Opacity" Value="1"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- ═════════ Playlist row: no blue Windows highlight, grey hover instead ═════════ -->
+        <Style x:Key="PlaylistItem" TargetType="ListBoxItem">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Padding="8,6" Margin="0,1">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SelectedBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
     </Application.Resources>
 </Application>

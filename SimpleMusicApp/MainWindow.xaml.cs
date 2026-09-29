@@ -1,47 +1,54 @@
 using System.Collections.ObjectModel;
-using System.IO;
 using System.Windows;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using SimpleMusicApp.Audio;
 using SimpleMusicApp.Models;
+using IOPath = System.IO.Path;                    // avoid clash with System.Windows.Shapes.Path
+using Rectangle = System.Windows.Shapes.Rectangle;
 
 namespace SimpleMusicApp;
 
 public partial class MainWindow : Window
 {
-    private static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aac" };
+    private static readonly string[] AudioExtensions = { ".mp3", ".wav", ".wma", ".m4a", ".aac", ".flac" };
+    private const int BarCount = 48;
 
-    // MediaPlayer = audio-only player (no visual element needed, unlike MediaElement).
-    private readonly MediaPlayer _player = new();
-
-    // Ticks every 500 ms to move the progress slider while a song plays.
-    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(500) };
-
-    // ObservableCollection notifies the ListBox automatically when songs are added/removed.
+    private readonly AudioPlayer _player = new();
     private readonly ObservableCollection<Track> _playlist = new();
 
+    // One timer (~33 fps) drives both the progress bar and the visualizer animation.
+    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(30) };
+
+    // Visualizer
+    private readonly Rectangle[] _bars = new Rectangle[BarCount];
+    private readonly float[] _targetLevels = new float[BarCount];  // what the music says right now
+    private readonly double[] _shownLevels = new double[BarCount]; // what we draw (smoothed)
+
     private int _currentIndex = -1;
-    private bool _isPlaying;
-    private bool _isDraggingSlider;    // user is holding the progress thumb
-    private bool _isUpdatingSlider;    // the timer (not the user) is changing the slider
+    private bool _isDraggingSlider;
+    private bool _isUpdatingSlider;
 
     public MainWindow()
     {
         InitializeComponent();
 
         PlaylistBox.ItemsSource = _playlist;
-        _player.Volume = VolumeSlider.Value;
+        _playlist.CollectionChanged += (_, _) =>
+            EmptyHint.Visibility = _playlist.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        _player.MediaOpened += Player_MediaOpened;
-        _player.MediaEnded += (_, _) => PlayNext();
-        _player.MediaFailed += (_, e) =>
-            MessageBox.Show($"Cannot play this file:\n{e.ErrorException.Message}", "Error");
+        _player.Volume = (float)VolumeSlider.Value;
+        _player.TrackEnded += (_, _) => PlayNext();
 
+        CreateVisualizerBars();
         _timer.Tick += Timer_Tick;
+        _timer.Start();
     }
+
+    private void Window_Closed(object? sender, EventArgs e) => _player.Dispose();
 
     // ───────────── Playlist ─────────────
 
@@ -50,7 +57,7 @@ public partial class MainWindow : Window
         var dialog = new OpenFileDialog
         {
             Title = "Choose songs",
-            Filter = "Audio files|*.mp3;*.wav;*.wma;*.m4a;*.aac|All files|*.*",
+            Filter = "Audio files|*.mp3;*.wav;*.wma;*.m4a;*.aac;*.flac|All files|*.*",
             Multiselect = true
         };
 
@@ -58,11 +65,10 @@ public partial class MainWindow : Window
             AddFiles(dialog.FileNames);
     }
 
-    // Drag & drop files from Explorer onto the window.
     private void Window_Drop(object sender, DragEventArgs e)
     {
         if (e.Data.GetData(DataFormats.FileDrop) is string[] files)
-            AddFiles(files.Where(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant())));
+            AddFiles(files.Where(f => AudioExtensions.Contains(IOPath.GetExtension(f).ToLowerInvariant())));
     }
 
     private void AddFiles(IEnumerable<string> files)
@@ -70,7 +76,6 @@ public partial class MainWindow : Window
         foreach (var file in files)
             _playlist.Add(new Track(file));
 
-        // Auto-select the first song so "Play" works right away.
         if (PlaylistBox.SelectedIndex < 0 && _playlist.Count > 0)
             PlaylistBox.SelectedIndex = 0;
     }
@@ -94,8 +99,18 @@ public partial class MainWindow : Window
         {
             _playlist.RemoveAt(index);
 
-            if (index == _currentIndex) Stop();          // removed the playing song
-            else if (index < _currentIndex) _currentIndex--; // keep pointing at the same song
+            if (index == _currentIndex) StopAll();            // removed the playing song
+            else if (index < _currentIndex) _currentIndex--;  // keep pointing at the same song
+        }
+    }
+
+    // Space = play/pause anywhere in the window.
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Space)
+        {
+            TogglePlayPause();
+            e.Handled = true; // stop the focused button from also "clicking"
         }
     }
 
@@ -105,67 +120,65 @@ public partial class MainWindow : Window
     {
         if (index < 0 || index >= _playlist.Count) return;
 
-        _currentIndex = index;
         var track = _playlist[index];
-
-        _player.Open(new Uri(track.FilePath)); // loads asynchronously → MediaOpened fires later
+        try
+        {
+            _player.Open(track.FilePath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Cannot play this file:\n{ex.Message}", "Error");
+            return;
+        }
         _player.Play();
-        _isPlaying = true;
-        _timer.Start();
+
+        // Update which song is green in the list.
+        if (_currentIndex >= 0 && _currentIndex < _playlist.Count)
+            _playlist[_currentIndex].IsPlaying = false;
+        track.IsPlaying = true;
+        _currentIndex = index;
 
         PlaylistBox.SelectedIndex = index;
-        NowPlayingText.Text = track.Title;
-        PlayPauseButton.Content = "⏸";
+        BigTitleText.Text = track.Title;
+        SmallTitleText.Text = track.Title;
+        BigSubText.Text = $"Local file • {Format(_player.Duration)}";
+        TotalTimeText.Text = Format(_player.Duration);
+        CurrentTimeText.Text = "0:00";
+
+        // Silently, otherwise shrinking Maximum would clamp Value → ValueChanged → seek the new song!
+        _isUpdatingSlider = true;
+        ProgressSlider.Value = 0;
+        ProgressSlider.Maximum = Math.Max(1, _player.Duration.TotalSeconds);
+        _isUpdatingSlider = false;
+        SetPlayIcon(isPlaying: true);
     }
 
-    private void Player_MediaOpened(object? sender, EventArgs e)
-    {
-        // Duration is only known after the file has been opened.
-        if (_player.NaturalDuration.HasTimeSpan)
-        {
-            var total = _player.NaturalDuration.TimeSpan;
-            ProgressSlider.Maximum = total.TotalSeconds;
-            TotalTimeText.Text = Format(total);
-        }
-    }
+    private void PlayPause_Click(object sender, RoutedEventArgs e) => TogglePlayPause();
 
-    private void PlayPause_Click(object sender, RoutedEventArgs e)
+    private void TogglePlayPause()
     {
-        if (_currentIndex < 0)
+        if (!_player.IsLoaded)
         {
-            // Nothing loaded yet → start the selected (or first) song.
-            PlayTrack(Math.Max(PlaylistBox.SelectedIndex, 0));
+            PlayTrack(Math.Max(PlaylistBox.SelectedIndex, 0)); // nothing loaded yet → start a song
             return;
         }
 
-        if (_isPlaying)
-        {
-            _player.Pause();
-            _timer.Stop();
-            PlayPauseButton.Content = "▶";
-        }
-        else
-        {
-            _player.Play();
-            _timer.Start();
-            PlayPauseButton.Content = "⏸";
-        }
-        _isPlaying = !_isPlaying;
+        if (_player.IsPlaying) _player.Pause();
+        else _player.Play();
+
+        SetPlayIcon(_player.IsPlaying);
     }
 
-    private void Stop_Click(object sender, RoutedEventArgs e) => Stop();
-
-    private void Stop()
+    private void StopAll()
     {
-        _player.Stop();
-        _timer.Stop();
-        _isPlaying = false;
+        _player.Close();
         _currentIndex = -1;
-
-        PlayPauseButton.Content = "▶";
-        NowPlayingText.Text = "Stopped";
+        SetPlayIcon(isPlaying: false);
+        BigTitleText.Text = "No song selected";
+        BigSubText.Text = "Pick a song from your library";
+        SmallTitleText.Text = "—";
         SetSliderSilently(0);
-        CurrentTimeText.Text = "00:00";
+        CurrentTimeText.Text = TotalTimeText.Text = "0:00";
     }
 
     private void Next_Click(object sender, RoutedEventArgs e) => PlayNext();
@@ -174,7 +187,7 @@ public partial class MainWindow : Window
     {
         if (_playlist.Count == 0) return;
 
-        // Like most players: if >3 s into the song, restart it; otherwise go to the previous one.
+        // Like Spotify: more than 3 s in → restart the song, otherwise go to the previous one.
         if (_player.Position.TotalSeconds > 3)
             _player.Position = TimeSpan.Zero;
         else
@@ -187,15 +200,67 @@ public partial class MainWindow : Window
         PlayTrack((_currentIndex + 1) % _playlist.Count); // wraps around to the first song
     }
 
-    // ───────────── Progress & volume ─────────────
+    private void SetPlayIcon(bool isPlaying) =>
+        PlayPauseButton.Content = isPlaying ? "" : ""; // Pause : Play glyph
+
+    // ───────────── Timer: progress + visualizer ─────────────
 
     private void Timer_Tick(object? sender, EventArgs e)
     {
-        if (_isDraggingSlider) return; // don't fight the user's mouse
+        if (_player.IsLoaded && !_isDraggingSlider)
+        {
+            SetSliderSilently(_player.Position.TotalSeconds);
+            CurrentTimeText.Text = Format(_player.Position);
+        }
 
-        SetSliderSilently(_player.Position.TotalSeconds);
-        CurrentTimeText.Text = Format(_player.Position);
+        UpdateVisualizer();
     }
+
+    private void CreateVisualizerBars()
+    {
+        // Each bar: green gradient, rounded, centered vertically → grows up AND down like a wave.
+        var fill = new LinearGradientBrush(
+            Color.FromRgb(0x1E, 0xD7, 0x60), Color.FromRgb(0x1D, 0x6F, 0xD9), 90);
+        fill.Freeze(); // frozen brushes are faster to draw
+
+        for (int i = 0; i < BarCount; i++)
+        {
+            _bars[i] = new Rectangle
+            {
+                Fill = fill,
+                RadiusX = 3,
+                RadiusY = 3,
+                Margin = new Thickness(3, 0, 3, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Height = 4
+            };
+            VisualizerGrid.Children.Add(_bars[i]);
+        }
+    }
+
+    private void UpdateVisualizer()
+    {
+        _player.GetSpectrum(_targetLevels); // all zeros when paused → bars fall down
+        double maxHeight = VisualizerGrid.ActualHeight;
+
+        for (int i = 0; i < BarCount; i++)
+        {
+            double target = _targetLevels[i];
+
+            // Rise fast, fall slowly → looks smooth instead of jittery.
+            _shownLevels[i] = target > _shownLevels[i]
+                ? _shownLevels[i] + (target - _shownLevels[i]) * 0.6
+                : _shownLevels[i] * 0.85;
+
+            _bars[i].Height = Math.Max(4, _shownLevels[i] * maxHeight);
+        }
+
+        // Cover art "pulses" with the bass (first few bars).
+        double bass = (_shownLevels[0] + _shownLevels[1] + _shownLevels[2] + _shownLevels[3]) / 4;
+        ArtScale.ScaleX = ArtScale.ScaleY = 1 + bass * 0.06;
+    }
+
+    // ───────────── Progress & volume sliders ─────────────
 
     private void ProgressSlider_DragStarted(object sender, DragStartedEventArgs e) => _isDraggingSlider = true;
 
@@ -211,14 +276,14 @@ public partial class MainWindow : Window
 
         CurrentTimeText.Text = Format(TimeSpan.FromSeconds(e.NewValue));
 
-        // A click on the track (not a drag) → seek immediately.
+        // A click on the bar (not a drag) → seek immediately.
         if (!_isDraggingSlider)
             _player.Position = TimeSpan.FromSeconds(e.NewValue);
     }
 
     private void VolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        _player.Volume = e.NewValue; // 0.0 – 1.0
+        _player.Volume = (float)e.NewValue; // 0.0 – 1.0
     }
 
     // ───────────── Helpers ─────────────
@@ -231,5 +296,5 @@ public partial class MainWindow : Window
     }
 
     private static string Format(TimeSpan t) =>
-        t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"mm\:ss");
+        t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
 }

@@ -1,26 +1,27 @@
 # Simple Music App in WPF
 
-A small music player built with WPF (.NET 8) — code-behind only, easy to read while learning WPF.
+A Spotify-style music player built with WPF (.NET 8) and [NAudio](https://github.com/naudio/NAudio), with a live audio visualizer.
 
 ## Features
-- Add songs via **＋ Add songs** or drag & drop files onto the window (mp3, wav, wma, m4a, aac)
-- Double-click / Enter to play, Delete to remove from playlist
-- Play / Pause, Stop, Previous, Next (auto-plays the next song, wraps around)
-- Seek bar (click or drag) with current / total time
-- Volume slider
+- Spotify-like dark UI: library panel, "Now playing" header, bottom player bar
+- **Visualizer**: 48 bars that move with the music's loudness per frequency (bass → treble); the cover art pulses with the bass
+- Add songs with **+** or drag & drop (mp3, wav, wma, m4a, aac, flac)
+- Double-click / Enter to play, Delete to remove, **Space** to play/pause
+- Previous / Next (auto-plays the next song), seek bar, volume
 
 ## Run
-Requires Windows + .NET 8 SDK.
+Requires Windows 10/11 + .NET 8 SDK.
 ```
 cd SimpleMusicApp
 dotnet run
 ```
-Or open `SimpleMusicApp/SimpleMusicApp.csproj` in Visual Studio and press F5.
 
 ## Project layout
 | File | What it does |
 |---|---|
-| `App.xaml` | Shared colors and the round button style |
-| `MainWindow.xaml` | UI layout (playlist, progress bar, buttons, volume) |
-| `MainWindow.xaml.cs` | Player logic: `MediaPlayer` + `DispatcherTimer` |
-| `Models/Track.cs` | One playlist entry (file path + title) |
+| `App.xaml` | Colors + styles (icon buttons, round play button, thin slider, playlist rows) |
+| `MainWindow.xaml` | Layout |
+| `MainWindow.xaml.cs` | UI logic, timer, visualizer animation |
+| `Audio/AudioPlayer.cs` | NAudio wrapper: play/pause/seek/volume + FFT spectrum |
+| `Audio/SampleCapture.cs` | Copies the samples flowing to the speakers so they can be analysed |
+| `Models/Track.cs` | One playlist entry |
